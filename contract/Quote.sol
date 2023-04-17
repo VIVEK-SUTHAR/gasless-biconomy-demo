@@ -46,10 +46,10 @@ contract Quote {
     function setQuoteMeta(
         address userAddress,
         string memory newQuote,
-        bytes32 sigR,
-        bytes32 sigS,
-        uint8 sigV
-    ) external {
+        bytes32 r,
+        bytes32 s,
+        uint8 v
+    ) public {
         MetaTransaction memory metaTx = MetaTransaction({
             nonce: nonces[userAddress],
             from: userAddress

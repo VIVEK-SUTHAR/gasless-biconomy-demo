@@ -3,7 +3,12 @@ import { ethers } from "ethers";
 import Head from "next/head";
 import React, { useState } from "react";
 import SignCard from "../components/SignCard";
-import { SIGNBOOK_ABI, SIGNERBOOK_ADDRESS } from "../data";
+import {
+  SIGNBOOK_ABI,
+  SIGNBOOK_CUSTOM_ABI,
+  SIGNBOOK_CUSTOM_ADDRESS,
+  SIGNERBOOK_ADDRESS,
+} from "../data";
 import styles from "../styles/Home.module.css";
 
 export default function Home() {
@@ -34,16 +39,20 @@ export default function Home() {
   React.useEffect(() => {
     fetchAllQuotes();
   }, []);
+
+  // let contract;
   const fetchAllQuotes = async () => {
     try {
       const provider = new ethers.providers.Web3Provider(window.ethereum);
       const signer = provider.getSigner();
       const contractInstance = new ethers.Contract(
-        SIGNERBOOK_ADDRESS,
-        SIGNBOOK_ABI,
+        SIGNBOOK_CUSTOM_ADDRESS,
+        SIGNBOOK_CUSTOM_ABI,
         signer
       );
-      const visitors = await contractInstance.getVisitors();
+      console.log(contractInstance);
+      const visitors = await contractInstance.getQuote();
+      console.log(visitors);
       setAllSigns(visitors);
     } catch (error) {
       console.log(error);
@@ -57,7 +66,7 @@ export default function Home() {
         debug: true,
         contractAddresses: [SIGNERBOOK_ADDRESS],
       });
-      const a = await biconomy.init();
+      await biconomy.init();
       const provider = biconomy.provider;
       const contractInstance = new ethers.Contract(
         SIGNERBOOK_ADDRESS,
@@ -70,7 +79,7 @@ export default function Home() {
       );
       let txParams = {
         data: data,
-        from: "0xa423A05Eb84EAB65E9137dEabfBD127dc253C052",
+        from: account,
         to: "0xE4D776526a354B870c21c4D9D83A39897844e582",
         signatureType: "EIP712_SIGN",
         gasLimit: 5000000,
@@ -88,6 +97,103 @@ export default function Home() {
         fetchAllQuotes();
       });
     } catch (error) {}
+  };
+
+  const sendGasLessMetaTx = async () => {
+    const biconomy = new Biconomy(window.ethereum, {
+      apiKey: process.env.NEXT_PUBLIC_BICONOMY_KEY,
+      debug: true,
+      contractAddresses: [SIGNBOOK_CUSTOM_ADDRESS],
+    });
+    await biconomy.init();
+    const provider = biconomy.provider;
+    const contractInstance = new ethers.Contract(
+      SIGNBOOK_CUSTOM_ADDRESS,
+      SIGNBOOK_CUSTOM_ABI,
+      biconomy.ethersProvider
+    );
+    console.log(contractInstance);
+    // console.log("Signer", signer);
+    let domainData = {
+      name: "Quote",
+      version: "1",
+      chainId: (await biconomy.ethersProvider.getNetwork()).chainId,
+      verifyingContract: SIGNBOOK_CUSTOM_ADDRESS,
+    };
+    const domainType = [
+      { name: "name", type: "string" },
+      { name: "version", type: "string" },
+      { name: "chainId", type: "uint256" },
+      { name: "verifyingContract", type: "address" },
+    ];
+    const metaTransactionType = [
+      { name: "nonce", type: "uint256" },
+      { name: "from", type: "address" },
+    ];
+    console.log("user-nonce call to SC");
+    const nonce = await contractInstance.nonces(account);
+    console.log("Got nonce", nonce);
+    let message = {};
+    message.nonce = parseInt(nonce);
+    message.from = account;
+    const dataToSign = {
+      types: {
+        EIP712Domain: domainType,
+        MetaTransaction: metaTransactionType,
+      },
+      domain: domainData,
+      primaryType: "MetaTransaction",
+      message: message,
+    };
+    console.log(dataToSign);
+    provider.send(
+      {
+        method: "eth_signTypedData_v4",
+        params: [account, JSON.stringify(dataToSign)],
+      },
+      (err, sign) => {
+        console.log("User Signatur", sign);
+        const signature = sign.result.substring(2);
+        const r = "0x" + signature.substring(0, 64);
+        const s = "0x" + signature.substring(64, 128);
+        const v = parseInt(signature.substring(128, 130), 16);
+        //Populate the txn to memepool
+        contractInstance.populateTransaction
+          .setQuoteMeta(account, input, r, s, v)
+          .then((res) => {
+            console.log(res);
+            alert("Transaction Sent");
+            //Once ready, send to the chain, with native
+            let txParams = {
+              data: res.data,
+              from: account,
+              to: SIGNBOOK_CUSTOM_ADDRESS,
+              signatureType: "EIP712_SIGN",
+              gasLimit: 5000000,
+            };
+            provider.send(
+              {
+                method: "eth_sendTransaction",
+                params: [txParams],
+              },
+              (error, resss) => {
+                alert("Transaction Sent!");
+                if (error) {
+                  console.log(error);
+                }
+                console.log(resss);
+              }
+            );
+            // console.log(d);
+          });
+      }
+    );
+    biconomy.on("transactionHash", (hash) => {
+      console.log(hash?.transactionId);
+    });
+    biconomy.on("txHashGenerated", (data) => {
+      console.log(data);
+    });
   };
 
   return (
@@ -109,17 +215,14 @@ export default function Home() {
               setInput(e.target.value);
             }}
           />
-          <button onClick={sendGasLess} className={styles.btn}>
+          <button onClick={sendGasLessMetaTx} className={styles.btn}>
             send
           </button>
         </div>
         <h4>Dont woory,this transaction is gasless</h4>
         <div className={styles.grid}>
-
-        {allSigns &&
-          allSigns.map((sign, index) => {
-            return <SignCard from={sign.from} message={sign.message} />;
-          })}
+          Currnet Quote is
+          <SignCard from={allSigns[1]} message={allSigns[0]} />
         </div>
       </main>
       <footer className={styles.footer}>
